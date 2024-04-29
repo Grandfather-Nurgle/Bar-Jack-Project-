@@ -1,0 +1,50 @@
+import os
+import subprocess
+import cv2
+import numpy as np
+import random
+
+def calculate_snr(frame):
+    mean, stddev = cv2.meanStdDev(frame)
+    if stddev[0, 0] < 1e-6:  # Check if standard deviation is close to zero
+        return -1  # Return a special value or handle it in some other way
+    return (np.mean(mean) / np.mean(stddev))[0]
+
+def extract_frames(video_path, output_folder, frame_count, hue_range):
+    os.makedirs(output_folder, exist_ok=True)  # Create output folder if it doesn't exist
+
+    # Get video duration using ffprobe
+    ffprobe_command = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', video_path]
+    duration = float(subprocess.check_output(ffprobe_command))
+
+    # Ensure frame count does not exceed video duration
+    frame_count = min(frame_count, int(duration))
+
+    selected_frames = random.sample(range(int(duration)), frame_count)
+
+    snrs = []
+    for i, frame_index in enumerate(selected_frames):
+        time = frame_index
+        frame_file = f'{output_folder}/frame_{int(time)}_{int(time * 1000)}.jpg'  # Generate unique filename
+        ffmpeg_command = ['ffmpeg', '-ss', str(time), '-i', video_path, '-frames:v', '1', '-vf', f"select='eq(n\,{time})'", frame_file]
+        subprocess.run(ffmpeg_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        frame = cv2.imread(frame_file)
+        hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv_frame, (int(hue_range[0] * 179), 0, 0), (int(hue_range[1] * 179), 255, 255))
+        masked_frame = cv2.bitwise_and(frame, frame, mask=mask)
+        print(mask)
+        snr = calculate_snr(masked_frame)
+        snrs.append(snr)
+        print(f"Frame {frame_index+1}: SNR = {snr}")
+
+    avg_snr = np.mean(snrs)
+    print(f"Average SNR for {frame_count} randomly extracted frames: {avg_snr}")
+
+if __name__ == "__main__":
+    video_path = 'H:/9_11_2023/09_11_2023_S6_L2_08_299.MP4'
+    output_folder = 'frames'
+    frame_count = 10
+    hue_range = (90, 100)  # Specify hue range in HSV (hue_min, hue_max)
+
+    extract_frames(video_path, output_folder, frame_count, hue_range)
